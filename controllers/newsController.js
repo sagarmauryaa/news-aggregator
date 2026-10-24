@@ -4,7 +4,6 @@ const {
   fetchNewsForPreferences,
   searchNews,
   getCachedArticle,
-  rememberArticle,
 } = require('../services/newsService');
 
 function upsertArticle(list, article) {
@@ -18,20 +17,8 @@ function upsertArticle(list, article) {
 
 async function resolveArticle(req) {
   const { id } = req.params;
-  let article = await getCachedArticle(id);
-
-  if (!article && req.body && req.body.title) {
-    article = {
-      id,
-      title: String(req.body.title),
-      description: req.body.description || null,
-      url: req.body.url || null,
-      source: req.body.source || null,
-      publishedAt: req.body.publishedAt || null,
-      imageUrl: req.body.imageUrl || null,
-    };
-    await rememberArticle(article);
-  }
+  // Only accept articles previously cached from the news provider — never client-supplied payloads
+  const article = await getCachedArticle(id);
 
   if (!article) {
     throw new AppError(
@@ -50,13 +37,53 @@ async function markOnUser(req, field) {
   return article;
 }
 
+function selectTopics(saved, requested) {
+  const preferences = Array.isArray(saved)
+    ? saved.filter((item) => typeof item === 'string')
+    : [];
+
+  if (requested === undefined) {
+    return preferences;
+  }
+
+  const rawValues = Array.isArray(requested) ? requested : [requested];
+  if (rawValues.some((item) => typeof item !== 'string')) {
+    throw new AppError('Invalid preferences', 400);
+  }
+
+  const requestedTopics = rawValues
+    .flatMap((item) => item.split(','))
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (requestedTopics.length === 0) {
+    throw new AppError('Invalid preferences', 400);
+  }
+
+  const savedByKey = new Map(preferences.map((item) => [item.toLowerCase(), item]));
+  const selected = [];
+
+  for (const topic of requestedTopics) {
+    const canonical = savedByKey.get(topic.toLowerCase());
+    if (!canonical) {
+      throw new AppError('Invalid preferences', 400);
+    }
+    if (!selected.includes(canonical)) {
+      selected.push(canonical);
+    }
+  }
+
+  return selected;
+}
+
 const getNews = asyncHandler(async (req, res) => {
-  const news = await fetchNewsForPreferences(req.user.preferences);
+  const topics = selectTopics(req.user.preferences, req.query.preferences);
+  const news = await fetchNewsForPreferences(topics, req.user.language || 'en');
   return res.status(200).json({ news });
 });
 
 const search = asyncHandler(async (req, res) => {
-  const news = await searchNews(req.params.keyword);
+  const news = await searchNews(req.params.keyword, req.user.language || 'en');
   return res.status(200).json({ news });
 });
 

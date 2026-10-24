@@ -1,8 +1,8 @@
-const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('../models/userModel');
 const AppError = require('../utils/AppError');
 const asyncHandler = require('../utils/asyncHandler');
+const { verifyToken } = require('../config/jwt');
 
 const authenticate = asyncHandler(async (req, res, next) => {
   const header = req.headers.authorization;
@@ -16,20 +16,13 @@ const authenticate = asyncHandler(async (req, res, next) => {
     throw new AppError('Unauthorized: token required', 401);
   }
 
-  let payload;
-  try {
-    payload = jwt.verify(match[1], process.env.JWT_SECRET || 'dev-secret');
-  } catch (err) {
-    throw new AppError('Unauthorized: invalid token', 401);
-  }
-
+  const payload = verifyToken(match[1]);
   const userId = payload && payload.userId;
   if (typeof userId !== 'string' || !mongoose.Types.ObjectId.isValid(userId)) {
     throw new AppError('Unauthorized: invalid token', 401);
   }
 
-  const user = await User.findById(userId).select('-password');
-
+  const user = await User.findById(userId);
   if (!user) {
     throw new AppError('Unauthorized: user not found', 401);
   }

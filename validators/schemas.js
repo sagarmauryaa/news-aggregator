@@ -1,4 +1,10 @@
 const { z } = require('zod');
+const {
+  BCRYPT_MAX_BYTES,
+  NEWS_LANGUAGES,
+  PREFERENCE_MAX_ITEMS,
+  PREFERENCE_MAX_LENGTH,
+} = require('./constants');
 
 const requiredText = (label) => z.string().trim().min(1, `${label} is required`);
 
@@ -6,23 +12,30 @@ const preferenceItem = z
   .string()
   .trim()
   .min(1, 'Preference cannot be empty')
-  .max(50, 'Preference must be at most 50 characters');
+  .max(PREFERENCE_MAX_LENGTH, `Preference must be at most ${PREFERENCE_MAX_LENGTH} characters`);
 
 const preferences = z
   .array(preferenceItem, { error: 'Preferences must be an array' })
-  .max(20, 'Preferences must contain at most 20 items');
+  .max(PREFERENCE_MAX_ITEMS, `Preferences must contain at most ${PREFERENCE_MAX_ITEMS} items`);
 
 const email = requiredText('Email').email('Valid email is required').toLowerCase();
+
+const password = z
+  .string()
+  .min(6, 'Password must be at least 6 characters')
+  .refine((value) => Buffer.byteLength(value, 'utf8') <= BCRYPT_MAX_BYTES, {
+    message: 'Password must be at most 72 bytes',
+  });
+
+const language = z.enum(NEWS_LANGUAGES, { error: 'Unsupported news language' });
 
 const signupSchema = z.object({
   body: z.object({
     name: requiredText('Name').max(100, 'Name must be at most 100 characters'),
     email,
-    password: z
-      .string()
-      .min(6, 'Password must be at least 6 characters')
-      .max(128, 'Password must be at most 128 characters'),
+    password,
     preferences: preferences.optional(),
+    language: language.optional(),
   }),
 });
 
@@ -36,6 +49,7 @@ const loginSchema = z.object({
 const updatePreferencesSchema = z.object({
   body: z.object({
     preferences,
+    language: language.optional(),
   }),
 });
 
@@ -51,10 +65,20 @@ const articleParamsSchema = z.object({
   }),
 });
 
+const newsQuerySchema = z.object({
+  query: z.object({
+    preferences: z.union([
+      z.string().trim().min(1, 'Preference cannot be empty'),
+      z.array(preferenceItem).min(1, 'Preference cannot be empty'),
+    ]).optional(),
+  }),
+});
+
 module.exports = {
   signupSchema,
   loginSchema,
   updatePreferencesSchema,
   searchSchema,
   articleParamsSchema,
+  newsQuerySchema,
 };

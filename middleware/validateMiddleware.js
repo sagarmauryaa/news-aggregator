@@ -14,6 +14,15 @@ function formatZodIssues(issues) {
   });
 }
 
+function useParsed(req, key, value) {
+  Object.defineProperty(req, key, {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value,
+  });
+}
+
 function validate(schema) {
   return function validateRequest(req, res, next) {
     const result = schema.safeParse({
@@ -28,16 +37,16 @@ function validate(schema) {
       return next(err);
     }
 
-    if (result.data.body !== undefined) {
-      req.body = result.data.body;
+    if (Object.prototype.hasOwnProperty.call(result.data, 'body')) {
+      useParsed(req, 'body', result.data.body);
     }
 
-    if (result.data.params) {
-      Object.assign(req.params, result.data.params);
+    if (Object.prototype.hasOwnProperty.call(result.data, 'params')) {
+      useParsed(req, 'params', result.data.params);
     }
 
-    if (result.data.query) {
-      Object.assign(req.query, result.data.query);
+    if (Object.prototype.hasOwnProperty.call(result.data, 'query')) {
+      useParsed(req, 'query', result.data.query);
     }
 
     return next();

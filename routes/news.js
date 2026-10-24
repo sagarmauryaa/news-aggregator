@@ -1,7 +1,7 @@
 const express = require('express');
 const authenticate = require('../middleware/authMiddleware');
 const validate = require('../middleware/validateMiddleware');
-const { searchSchema, articleParamsSchema } = require('../validators/schemas');
+const { searchSchema, articleParamsSchema, newsQuerySchema } = require('../validators/schemas');
 const {
   getNews,
   search,
@@ -15,7 +15,7 @@ const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/', getNews);
+router.get('/', validate(newsQuerySchema), getNews);
 router.get('/read', getRead);
 router.get('/favorites', getFavorites);
 router.get('/search/:keyword', validate(searchSchema), search);

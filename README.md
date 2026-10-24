@@ -27,13 +27,15 @@ Edit `.env` and set at least `MONGODB_URI`, `JWT_SECRET`, and `NEWS_API_KEY`.
 | --- | --- | --- |
 | `PORT` | HTTP port | `3000` |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/news-aggregator` |
-| `JWT_SECRET` | Secret used to sign login tokens | `dev-secret` |
+| `JWT_SECRET` | Secret used to sign login tokens. Required, at least 32 characters | none |
 | `JWT_EXPIRES_IN` | Token lifetime | `7d` |
 | `NEWS_API_KEY` | NewsAPI key sent as `X-Api-Key` | none |
 | `NEWS_API_BASE_URL` | Override for the NewsAPI everything endpoint | `https://newsapi.org/v2/everything` |
 | `CACHE_TTL_SECONDS` | How long a preference or search feed stays cached | `3600` |
 | `ARTICLE_CACHE_TTL_SECONDS` | How long an article id can be marked read or favorite | `86400` |
-| `CACHE_REFRESH_MS` | How often cached preference feeds are refreshed | `1800000` |
+| `CACHE_REFRESH_MS` | How often cached preference feeds are refreshed and expired entries are removed | `1800000` |
+| `CACHE_MAX_FEEDS` | Maximum cached feeds. Oldest feeds are evicted after this | `100` |
+| `CACHE_MAX_ARTICLES` | Maximum cached articles. Oldest articles are evicted after this | `1000` |
 
 Start the server:
 
@@ -57,7 +59,7 @@ Public routes are signup and login. Every `/news` route and both preference rout
 Authorization: Bearer <token>
 ```
 
-The token is the `token` field returned by `POST /users/login`. Passwords are hashed with bcrypt before they are stored.
+The token is the `token` field returned by `POST /users/login` or `POST /login`. Passwords are hashed with bcrypt before they are stored. The password field is excluded from queries and is selected only when checking a login. Tokens are signed with `JWT_SECRET`; there is no built-in secret.
 
 ## API
 
@@ -93,7 +95,7 @@ Creates a user. Preferences are optional.
 | --- | --- |
 | `name` | Required, at most 100 characters |
 | `email` | Required, valid email |
-| `password` | 6 to 128 characters |
+| `password` | At least 6 characters and at most 72 bytes |
 | `preferences` | Optional array of 1–20 non-empty strings, each at most 50 characters |
 
 `200`
@@ -105,12 +107,15 @@ Creates a user. Preferences are optional.
     "id": "…",
     "name": "Clark Kent",
     "email": "clark@superman.com",
-    "preferences": ["movies", "comics"]
+    "preferences": ["movies", "comics"],
+    "language": "en"
   }
 }
 ```
 
-`400` when validation fails or the email is already registered.
+`400` when validation fails or the email is already registered. Email is stored in lowercase, so `User@example.com` and `user@example.com` are the same account.
+
+`POST /register` is the same operation without the `/users` prefix.
 
 #### `POST /users/login`
 
@@ -129,6 +134,8 @@ Creates a user. Preferences are optional.
 
 `401` when the email or password is wrong. `400` when a field is missing.
 
+`POST /login` is the same operation without the `/users` prefix.
+
 #### `GET /users/preferences`
 
 Requires a token.
@@ -136,7 +143,7 @@ Requires a token.
 `200`
 
 ```json
-{ "preferences": ["movies", "comics"] }
+{ "preferences": ["movies", "comics"], "language": "en" }
 ```
 
 #### `PUT /users/preferences`
@@ -150,10 +157,14 @@ Requires a token. Replaces the whole preference list.
 `200`
 
 ```json
-{ "preferences": ["movies", "comics", "games"] }
+{ "preferences": ["movies", "comics", "games"], "language": "en" }
 ```
 
 `400` when `preferences` is missing, not an array, or contains an empty item.
+
+`GET /preferences` and `PUT /preferences` are the same operations without the `/users` prefix.
+
+An optional `language` field on signup and on preference updates selects the NewsAPI language. Allowed values are `ar`, `de`, `en`, `es`, `fr`, `he`, `it`, `nl`, `no`, `pt`, `ru`, `sv`, `ud`, and `zh`. The default is `en`.
 
 ### News
 
@@ -175,7 +186,9 @@ All news routes require a token. An article looks like this:
 
 #### `GET /news`
 
-Returns up to 20 English articles for the signed-in user's preferences, newest first. An empty preference list uses the query `general`. Multiple preferences are joined with `OR`.
+Returns up to 20 articles for the signed-in user's preferences, newest first, in the user's saved language (`en` by default). An empty preference list uses the query `general`. Multiple preferences are joined with `OR`.
+
+`GET /news?preferences=movies` limits the feed to saved preferences named in the query. A preference the user has not saved, such as `preferences=wrong`, returns `400`.
 
 `200`
 
@@ -183,9 +196,9 @@ Returns up to 20 English articles for the signed-in user's preferences, newest f
 { "news": [] }
 ```
 
-If the provider cannot be reached, the response is still `200` and contains one fallback article whose `source` is `"fallback"`.
+If the provider cannot be reached, the API key is missing, or the provider returns an error, the response is `502` or `503`. Provider failures are not replaced with a fabricated article.
 
-Repeated calls for the same preference set are served from the in-memory cache until `CACHE_TTL_SECONDS` elapses. A background job refreshes recently used preference feeds every `CACHE_REFRESH_MS`.
+Repeated calls for the same preference set and language are served from the in-memory cache until `CACHE_TTL_SECONDS` elapses. Expired entries are removed on a timer, and the oldest entries are evicted once `CACHE_MAX_FEEDS` or `CACHE_MAX_ARTICLES` is reached. A background job refreshes recently used preference feeds every `CACHE_REFRESH_MS`.
 
 #### `GET /news/search/:keyword`
 
@@ -197,7 +210,7 @@ Searches NewsAPI by keyword, sorted by relevancy. The keyword is required and mu
 { "news": [] }
 ```
 
-`400` for an invalid keyword. `502` or `503` when the provider fails or the API key is missing. Search does not return a fallback article.
+`400` for an invalid keyword. `502` or `503` when the provider fails or the API key is missing. Search uses the user's saved language.
 
 #### `POST /news/:id/read`
 
@@ -251,9 +264,9 @@ Same rules as mark-as-read. Stores the article on the user's favorites.
 npm run test
 ```
 
-Tests use Tap and Supertest. They connect to `MONGODB_URI` and **delete every document in the users collection** before they run. Point `MONGODB_URI` at a local development database, not a database you need to keep.
+Tests use Tap and Supertest. A test run does not connect to `MONGODB_URI` and does not delete users from the application database. Tap runs use `TEST_MONGODB_URI` when that variable names a database containing `test`; otherwise each run uses a fresh `news-aggregator-test-<pid>` database and drops it when the suite finishes. User cleanup runs in the test setup, and only after the connected database name is confirmed to be a test database.
 
-NewsAPI calls during tests need a valid `NEWS_API_KEY`. If the provider is unreachable, preference feeds fall back to a single placeholder article so the read and favorite tests can still run.
+NewsAPI calls during tests need a valid `NEWS_API_KEY`. A provider failure is returned as an error.
 
 ## Project layout
 

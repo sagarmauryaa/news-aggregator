@@ -2,11 +2,22 @@ require('dotenv').config({ quiet: true });
 
 const express = require('express');
 const connectDB = require('./config/db');
+const { jwtSecret } = require('./config/jwt');
 const usersRouter = require('./routes/users');
 const newsRouter = require('./routes/news');
 const { startPeriodicRefresh } = require('./services/newsService');
 const logger = require('./middleware/loggerMiddleware');
 const { notFoundHandler, errorHandler } = require('./middleware/errorMiddleware');
+
+try {
+  jwtSecret();
+} catch (err) {
+  console.error(err.message);
+  if (require.main === module) {
+    process.exit(1);
+  }
+  throw err;
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -28,6 +39,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/users', usersRouter);
+app.use(usersRouter.assignmentRouter);
 app.use('/news', newsRouter);
 
 app.use(notFoundHandler);
@@ -44,4 +56,5 @@ if (require.main === module) {
   });
 }
 
+app.dbReady = dbReady;
 module.exports = app;
