@@ -5,7 +5,8 @@ const connectDB = require('./config/db');
 const usersRouter = require('./routes/users');
 const newsRouter = require('./routes/news');
 const { startPeriodicRefresh } = require('./services/newsService');
-const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
+const logger = require('./middleware/loggerMiddleware');
+const { notFoundHandler, errorHandler } = require('./middleware/errorMiddleware');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,6 +19,7 @@ const dbReady = connectDB().catch((err) => {
   throw err;
 });
 
+app.use(logger);
 app.use(express.json());
 
 // Tests call the app while MongoDB is still connecting.

@@ -45,4 +45,3 @@ function validate(schema) {
 }
 
 module.exports = validate;
-module.exports.formatZodIssues = formatZodIssues;

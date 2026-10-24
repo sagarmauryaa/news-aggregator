@@ -1,6 +1,6 @@
 const express = require('express');
-const authenticate = require('../middleware/auth');
-const validate = require('../middleware/validate');
+const authenticate = require('../middleware/authMiddleware');
+const validate = require('../middleware/validateMiddleware');
 const { searchSchema, articleParamsSchema } = require('../validators/schemas');
 const {
   getNews,
